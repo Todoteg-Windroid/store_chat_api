@@ -77,6 +77,8 @@ public class MessageListener {
 
 	/** Send a user update JSON to all connected admin sessions */
 	private void notifyAdminsOfUserUpdate(User user) {
+		// Don't send admin users as contacts
+		if (adminEmails.contains(user.getEmail())) return;
 		String json = toJson(user);
 		users.entrySet().stream()
 				.filter(e -> Boolean.TRUE.equals(e.getKey().getIsAdmin()))
