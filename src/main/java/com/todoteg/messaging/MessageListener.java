@@ -75,16 +75,28 @@ public class MessageListener {
 		return (Sinks.Many<String>) session.getAttributes().get("outputSink");
 	}
 
-	/** Send a user update JSON to all connected admin sessions */
+	/** Send a user update JSON to all connected admin sessions (only if client has chat history) */
 	private void notifyAdminsOfUserUpdate(User user) {
-		// Don't send admin users as contacts
-		if (adminEmails.contains(user.getEmail())) return;
-		String json = toJson(user);
-		users.entrySet().stream()
-				.filter(e -> Boolean.TRUE.equals(e.getKey().getIsAdmin()))
-				.forEach(e -> {
-					Sinks.Many<String> sink = getOutputSink(e.getValue());
-					if (sink != null) sink.tryEmitNext(json);
+		if (user.getEmail() == null || adminEmails.contains(user.getEmail())) return;
+		
+		String adminEmail = getFirstAdminEmail();
+		if (adminEmail == null) return;
+		
+		// Only notify if this client has chat history with admin
+		repoChatMessage.findAllInvolvingEmail(adminEmail)
+				.map(msg -> msg.getSender().equals(adminEmail) ? msg.getRecipient() : msg.getSender())
+				.distinct()
+				.any(email -> email != null && email.equals(user.getEmail()))
+				.subscribe(hasHistory -> {
+					if (hasHistory) {
+						String json = toJson(user);
+						users.entrySet().stream()
+								.filter(e -> Boolean.TRUE.equals(e.getKey().getIsAdmin()))
+								.forEach(e -> {
+									Sinks.Many<String> sink = getOutputSink(e.getValue());
+									if (sink != null) sink.tryEmitNext(json);
+								});
+					}
 				});
 	}
 
@@ -212,6 +224,21 @@ public class MessageListener {
 				if(isActiveUserPair.containsKey(sessionId) && isActiveUserPair.get(sessionId).size() == 2) {
 					message.setRead(true);
 				}
+
+				// After saving the message, notify admin of new contact if this is first message
+				if (!isAdmin(session)) {
+					return service.onNext(message, message.getSender(), message.getRecipient())
+							.then(Mono.defer(() -> {
+								// Find current user in users map and push update to admin
+								Optional<User> currentUser = users.keySet().stream()
+										.filter(u -> u.getEmail() != null && u.getEmail().equals(authEmail))
+										.findFirst();
+								if (currentUser.isPresent()) {
+									notifyAdminsOfUserUpdate(currentUser.get());
+								}
+								return Mono.empty();
+							}));
+				}
 				return service.onNext(message, message.getSender(), message.getRecipient());
 			}
 			case LEAVE -> {
@@ -246,8 +273,18 @@ public class MessageListener {
 			return Mono.empty();
 		}
 
-		return serviceUser.listar()
-				.filter(usr -> !usr.getEmail().equals(adminUser.getEmail()) && !adminEmails.contains(usr.getEmail()))
+		String adminEmail = adminUser.getEmail();
+		if (adminEmail == null) {
+			log.warn("sendAllUsersToAdmin: admin email is null");
+			return Mono.empty();
+		}
+
+		// Only load clients that have chat history with admin
+		return repoChatMessage.findAllInvolvingEmail(adminEmail)
+				.map(msg -> msg.getSender().equals(adminEmail) ? msg.getRecipient() : msg.getSender())
+				.distinct()
+				.filter(email -> email != null && !adminEmails.contains(email))
+				.flatMap(email -> serviceUser.findByEmail(email))
 				.doOnNext(usr -> {
 					boolean isOnline = users.keySet().stream()
 							.anyMatch(u -> u.getEmail() != null && u.getEmail().equals(usr.getEmail()));
@@ -257,7 +294,7 @@ public class MessageListener {
 						log.warn("Failed to emit user {} to admin sink: {}", usr.getEmail(), result);
 					}
 				})
-				.doOnComplete(() -> log.info("sendAllUsersToAdmin completed for {}", adminUser.getEmail()))
+				.doOnComplete(() -> log.info("sendAllUsersToAdmin completed for {}", adminEmail))
 				.doOnError(e -> log.error("sendAllUsersToAdmin error: {}", e.getMessage()))
 				.then();
 	}

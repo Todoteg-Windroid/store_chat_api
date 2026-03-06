@@ -25,11 +25,19 @@ public class WebSocketAuthFilter implements WebFilter {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
-        if (!path.equals("/chat-socket")) {
+        // Only authenticate WebSocket and API paths
+        if (!path.equals("/chat-socket") && !path.startsWith("/api/")) {
             return chain.filter(exchange);
         }
 
         String token = request.getQueryParams().getFirst("token");
+        // Also check Authorization header for REST endpoints
+        if (token == null || token.isBlank()) {
+            String authHeader = request.getHeaders().getFirst("Authorization");
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                token = authHeader.substring(7);
+            }
+        }
 
         if (token == null || token.isBlank()) {
             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
