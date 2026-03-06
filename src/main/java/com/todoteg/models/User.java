@@ -14,6 +14,7 @@ public class User {
 	private String email;
 	private Long storeUserId;
 	private Boolean status;
+	private Boolean isAdmin;
 	
 	public String getName() {
 		return name;
@@ -26,6 +27,9 @@ public class User {
 	}
 	public Boolean getStatus() {
 		return status;
+	}
+	public Boolean getIsAdmin() {
+		return isAdmin;
 	}
 	
 	@Override
@@ -66,6 +70,10 @@ public class User {
  		}
  		public Builder setStatus(Boolean status) {
  			this.user.status = status;
+			return this;
+ 		}
+ 		public Builder setIsAdmin(Boolean isAdmin) {
+ 			this.user.isAdmin = isAdmin;
 			return this;
  		}
 

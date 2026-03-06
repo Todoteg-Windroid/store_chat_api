@@ -19,6 +19,13 @@ public class ChatMessage implements IMessage {
     
     private boolean isRead = false;
     
+    // Product reference fields (null for regular messages)
+    private String productName;
+    private String productImage;
+    private String productPrice;
+    private String productSlug;
+    private String variantDetails;
+    
     
     
     
@@ -125,6 +132,36 @@ public class ChatMessage implements IMessage {
 	}
 	public void setRead(boolean isRead) {
 		this.isRead = isRead;
+	}
+	public String getProductName() {
+		return productName;
+	}
+	public void setProductName(String productName) {
+		this.productName = productName;
+	}
+	public String getProductImage() {
+		return productImage;
+	}
+	public void setProductImage(String productImage) {
+		this.productImage = productImage;
+	}
+	public String getProductPrice() {
+		return productPrice;
+	}
+	public void setProductPrice(String productPrice) {
+		this.productPrice = productPrice;
+	}
+	public String getProductSlug() {
+		return productSlug;
+	}
+	public void setProductSlug(String productSlug) {
+		this.productSlug = productSlug;
+	}
+	public String getVariantDetails() {
+		return variantDetails;
+	}
+	public void setVariantDetails(String variantDetails) {
+		this.variantDetails = variantDetails;
 	}
     
     
