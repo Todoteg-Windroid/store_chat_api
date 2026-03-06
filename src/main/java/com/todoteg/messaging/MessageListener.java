@@ -3,10 +3,10 @@ package com.todoteg.messaging;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,10 +37,10 @@ public class MessageListener {
 	
 	private static final Logger log = org.slf4j.LoggerFactory.getLogger(MessagingService.class);
 	private final MessagingService service;
-	private static Map<User, WebSocketSession> users = new HashMap<>();
+	private static Map<User, WebSocketSession> users = new ConcurrentHashMap<>();
 	private final ObjectMapper mapper;
-	Map<String, Sinks.One<Void>> stopSignals = new HashMap<>();
-	Map<String, List<Boolean>> isActiveUserPair = new HashMap<>();
+	Map<String, Sinks.One<Void>> stopSignals = new ConcurrentHashMap<>();
+	Map<String, List<Boolean>> isActiveUserPair = new ConcurrentHashMap<>();
 	private final IUserService serviceUser;
 	private final IChatMessageRepo repoChatMessage;
 	private final List<String> adminEmails;
@@ -115,7 +115,7 @@ public class MessageListener {
 									: serviceUser.registrar(user);
 							return saveOp
 									.doOnNext(usr -> notifyAdminsOfUserUpdate(usr))
-									.then(admin ? sendAllUsersToAdmin(user, session) : Mono.empty());
+									.then(Mono.defer(() -> admin ? sendAllUsersToAdmin(user, session) : Mono.empty()));
 						});
 			}
 			case JOIN_CHAT -> {
@@ -241,7 +241,10 @@ public class MessageListener {
 	 */
 	private Mono<Void> sendAllUsersToAdmin(User adminUser, WebSocketSession session) {
 		Sinks.Many<String> outputSink = getOutputSink(session);
-		if (outputSink == null) return Mono.empty();
+		if (outputSink == null) {
+			log.warn("sendAllUsersToAdmin: outputSink is null for session {}", session.getId());
+			return Mono.empty();
+		}
 
 		return serviceUser.listar()
 				.filter(usr -> !usr.getEmail().equals(adminUser.getEmail()) && !adminEmails.contains(usr.getEmail()))
@@ -249,8 +252,13 @@ public class MessageListener {
 					boolean isOnline = users.keySet().stream()
 							.anyMatch(u -> u.getEmail() != null && u.getEmail().equals(usr.getEmail()));
 					User userToSend = isOnline ? usr : usr.toBuilder().setStatus(false).build();
-					outputSink.tryEmitNext(toJson(userToSend));
+					Sinks.EmitResult result = outputSink.tryEmitNext(toJson(userToSend));
+					if (result.isFailure()) {
+						log.warn("Failed to emit user {} to admin sink: {}", usr.getEmail(), result);
+					}
 				})
+				.doOnComplete(() -> log.info("sendAllUsersToAdmin completed for {}", adminUser.getEmail()))
+				.doOnError(e -> log.error("sendAllUsersToAdmin error: {}", e.getMessage()))
 				.then();
 	}
 	
@@ -258,13 +266,15 @@ public class MessageListener {
 		String authEmail = getAuthEmail(session);
 		if (authEmail == null) return;
 
-		Optional<User> userLeave = users.keySet().stream()
-				.filter(user -> user.getEmail() != null && user.getEmail().equals(authEmail))
+		// Only remove if this session is still the active one for this user
+		Optional<Map.Entry<User, WebSocketSession>> entry = users.entrySet().stream()
+				.filter(e -> e.getKey().getEmail() != null && e.getKey().getEmail().equals(authEmail)
+						&& e.getValue().getId().equals(session.getId()))
 				.findFirst();
 
-		if (userLeave.isPresent()) {
-		    users.remove(userLeave.get());
-		    User userModified = userLeave.get().toBuilder().setStatus(false).build();
+		if (entry.isPresent()) {
+		    users.remove(entry.get().getKey());
+		    User userModified = entry.get().getKey().toBuilder().setStatus(false).build();
 		    serviceUser.modificar(userModified)
 		    		.doOnNext(usr -> notifyAdminsOfUserUpdate(usr))
 		    		.subscribe();
