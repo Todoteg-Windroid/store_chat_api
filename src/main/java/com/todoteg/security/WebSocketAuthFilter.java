@@ -2,6 +2,7 @@ package com.todoteg.security;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,12 @@ public class WebSocketAuthFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
+
+        // Let CORS preflight requests pass through without auth validation
+        // The CorsWebFilter (higher precedence) handles adding the CORS headers
+        if (HttpMethod.OPTIONS.equals(request.getMethod())) {
+            return chain.filter(exchange);
+        }
 
         // Only authenticate WebSocket and API paths
         if (!path.equals("/chat-socket") && !path.startsWith("/api/")) {
